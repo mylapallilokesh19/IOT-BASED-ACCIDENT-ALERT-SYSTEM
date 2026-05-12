@@ -1,0 +1,96 @@
+#define BLYNK_TEMPLATE_ID "TMPL3jTjMG7UK"
+#define BLYNK_TEMPLATE_NAME "FINAL"
+#define BLYNK_AUTH_TOKEN "hj6hblek1UTkzsnMGuG37FuBp5Vttgq8"
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <Wire.h>
+#include <MPU6050.h>
+
+// WiFi Credentials
+char ssid[] = "abcd";
+char pass[] = "88888888";
+
+// Objects
+MPU6050 mpu;
+
+// Pins
+#define ALCOHOL_PIN A0
+#define RELAY_PIN   D5
+
+// Thresholds
+int alcoholThreshold  = 450;
+int accidentThreshold = 4000;
+
+// Flags to avoid repeated alerts
+bool alcoholAlertSent  = false;
+bool accidentAlertSent = false;
+
+void setup() {
+  Serial.begin(9600);
+  delay(1000);
+
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH);   // Engine ON initially
+
+  Wire.begin(D2, D1);              // SDA, SCL
+  mpu.initialize();
+
+  Serial.println("Connecting to Blynk...");
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass, "blynk.cloud", 80);
+}
+
+void loop() {
+  Blynk.run();
+
+  /* -------- Alcohol Detection -------- */
+  int alcoholValue = analogRead(ALCOHOL_PIN);
+  Blynk.virtualWrite(V0, alcoholValue);
+
+  /* -------- Accelerometer Reading -------- */
+  int16_t ax, ay, az;
+  mpu.getAcceleration(&ax, &ay, &az);
+
+  float accMag = sqrt((float)ax * ax +
+                      (float)ay * ay +
+                      (float)az * az);
+
+  float netAcc = abs(accMag - 16384);   // Remove gravity
+  Blynk.virtualWrite(V1, (int)netAcc);
+
+  Serial.print("Alcohol: ");
+  Serial.print(alcoholValue);
+  Serial.print(" | Net Acc: ");
+  Serial.println(netAcc);
+
+  /* -------- Alcohol Logic (RELAY CONTROL) -------- */
+  if (alcoholValue > alcoholThreshold) {
+    digitalWrite(RELAY_PIN, LOW);        // Engine OFF
+    Blynk.virtualWrite(V2, 0);            // Relay OFF indicator
+
+    if (!alcoholAlertSent) {
+      Serial.println("ALCOHOL DETECTED – ENGINE OFF");
+      Blynk.logEvent("alcohol_alert");
+      alcoholAlertSent = true;
+    }
+  } 
+  else {
+    digitalWrite(RELAY_PIN, HIGH);       // Engine ON
+    Blynk.virtualWrite(V2, 1);            // Relay ON indicator
+    alcoholAlertSent = false;
+  }
+
+  /* -------- Accident Logic (ALERT ONLY) -------- */
+  if (netAcc > accidentThreshold) {
+    if (!accidentAlertSent) {
+      Serial.println("ACCIDENT DETECTED – ALERT SENT");
+      Blynk.logEvent("accident_alert");
+      accidentAlertSent = true;
+    }
+  } 
+  else {
+    accidentAlertSent = false;
+  }
+
+  delay(200);
+}
